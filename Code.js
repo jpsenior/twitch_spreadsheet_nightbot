@@ -30,19 +30,40 @@ THE SOFTWARE.
    In order to integrate this, you need to create a nightbot command using
    the custom API feature.
    
-   !addcom !search $(customapi https://script.google.com/macros/s/AKfycbxUGS261TNrh-B57zMFPKQV0DfGbPRO1n_5Z4iA3MT8uvF2jkIX/exec?game=$(query))
-   
+   !addcom !search $(customapi https://script.google.com/macros/s/AKfycbzbFd-UHGQVq9biiwgD5GY0GfXpluplrqvPJlG6v88NX4rqtWKP/exec?action=game&query=$(query))
+   !addcom !invite $(customapi https://script.google.com/macros/s/AKfycbzbFd-UHGQVq9biiwgD5GY0GfXpluplrqvPJlG6v88NX4rqtWKP/exec?action=invite&username=$(touser)&oauth=<OAUTH>)
+   !addcom !translate $(customapi https://script.google.com/macros/s/AKfycbzbFd-UHGQVq9biiwgD5GY0GfXpluplrqvPJlG6v88NX4rqtWKP/exec?action=translate&from=en&to=pt&text=$(query))
    Where the URL included is the twitch URL.
    
 */
 
+
 // TODO:
-
-
+// - Minimum query length
+// - Clean up smileys when printing the "not found" message
 // - Remove THE/A and such things in clean()
 // - Replace roman numerals with numbers (VI -> 6)
+// - There's a problem if "&" character (and possibly others) is used in game queries.
+//   The problem is that the query done by nightbot doesn't escape the & character properly
+//   (and AFAIK there's no way to make it escape it), so it appears as a start of the next parameter
+//   to the script. E.g. if query is "battletoads & foobar" nightbot does query: blah?game=battletoads&foobar
+//   A proper fix would be to get nightbot to escape the parameter, but if that's not possible,
+//   e.queryString could be used to figure out the full query.
 
 
+
+
+var ss = SpreadsheetApp.openByUrl(
+  'https://docs.google.com/spreadsheets/d/sheet url here/edit#gid=0'
+);
+
+var twitchIcon = 'Kappa'
+
+var inviteRoomName = "Spoilers chat"
+
+var inviteRoom = "_group_Chat_Room"
+
+// Do not edit anything below this line for end user stuff. //
 
 // Little bit less than 400 so that the extra text can fit in.
 var MAX_RESULT_LENGTH = 350
@@ -51,18 +72,6 @@ var integerRegex = /^[0-9]+$/;
 
 var asteriskRegex = /^\*.*/;
 
-// Beaten Games - Cogu's List
-// put in your Google Sheets URL here: Copy-paste it from the browser. That's it!
-var ss = SpreadsheetApp.openByUrl(
-  'https://docs.google.com/spreadsheets/d/1Wnpk44rSTMB3Y7OLVww1WSGdGBUz7eR6edpRYzs3-EE/edit#gid=0'
-);
-// This is the name of the individual spreadsheet we want to search.
-
-// Scroll down to function checkRow to define your database schema.
-// Scroll down to function checkRow to define your database schema.
-var sheet = ss.getSheetByName( "Página1" );
-
-var twitchIcon = 'coguxLorao'
 
 function clean( str )
 {
@@ -129,8 +138,7 @@ function formatResultLong( result )
          + " (chosen by " + result.chosenBy
          + ") hasn't been beaten yet";
   
-  resultString += result.console + " " + result.game + 
-        " (chosen by " + result.chosenBy
+  resultString += result.game + " (chosen by " + result.chosenBy
                   + ") was beaten on " + result.dateBeaten;
   
   if ( !isEmptyTrimmed( result.time ) )
@@ -138,6 +146,9 @@ function formatResultLong( result )
   
   if ( !isEmptyTrimmed( result.rating ) )
     resultString += ", rated " + result.rating + "/10";
+  
+    if ( !isEmptyTrimmed( result.video ) )
+      resultString += ", Video: " + result.video;
   
   return resultString;
 }
@@ -152,19 +163,24 @@ function formatResultShort( result )
   return indexString + result.game;
 }
 
-function checkRow( row, query )
+function checkRow( row, formula, query )
 {
   var rowIndex      = row[0],
       rowGame       = row[1],
-      rowGenre      = row[2],
-      rowConsole    = row[3],
-      rowChosenBy   = row[4],
+      rowChosenBy   = row[2],
+      rowDateBeaten = row[8],
+      rowTime       = row[9],
       rowRating     = row[5],
-      rowDateBeaten = row[6],
-      rowTime       = row[7];
+      rowVideo      = formula[14];
   
   function makeResult( exact )
   {
+    if ( !isEmptyTrimmed( rowVideo ) ) {
+        video = rowVideo.match(/\"(.*)\",/)[1]
+    }
+    else {
+      video = ''
+    }
     return {
       exact:      exact,
       index:      rowIndex,
@@ -173,8 +189,9 @@ function checkRow( row, query )
       dateBeaten: formatDate( rowDateBeaten ),
       time:       formatDuration( rowTime ),
       rating:     rowRating,
-      console:    rowConsole,
-      genre:      rowGenre
+      // test Extracts URL from HYPERLINK("link", text)
+      video:      video
+
     }
   }
   
@@ -208,10 +225,55 @@ function checkRow( row, query )
   return;
 }
 
+function checkRow_new( row, query )
+{
+  var rowIndex      = row[0],
+      rowGame       = row[1],
+      rowBeaten     = row[3],
+      rowGenre      = row[4]; 
+  var queryClean = clean( query );
+  if ( clean( rowGame ).indexOf( queryClean ) >= 0)
+  {
+    return {
+      game: rowGame,
+      genre: rowGenre
+    }
+  }
+  
+  // Didn't match.
+  return;
+}
+
+function formatNewResults(results)
+{
+
+  newResults = [];
+  
+ for (var i = 0; i < results.length; ++i)
+ {
+   var result = results[i];
+   newResults.push( result.game + ":" + result.genre + " " );
+ }
+  return newResults
+   
+}
+
+
 function formatLookupResults( results, query )
 {
-  if ( results.length === 0 )
-    return twitchIcon + ' Sorry, no entry was found for "' + query + ' ' + twitchIcon
+  if ( results.length === 0 ) {
+    //results = lookup( query, "Games List" );
+    //Logger.log(results);    
+    newresults = lookup( query, "Games List" );
+    formatted = formatNewResults(newresults)
+    Logger.log(formatted + formatted.length)
+    if (formatted.length != 0) {
+      return twitchIcon + ' ' + query + ' was not beaten, but can be picked!! ' + formatted;
+    }
+  }
+  if (results.length === 0 ) {
+    return twitchIcon + ' Sorry, no entry was found for "' + query + '" ' + twitchIcon;
+  }
   
   // See if there was an exact result.
   for ( var i = 0; i < results.length; ++i )
@@ -265,11 +327,11 @@ function formatLookupResults( results, query )
   return resultString;
 }
 
-function lookup( query )
+function lookup( query, sheetname )
 {
-  //page 1
+  var sheet = ss.getSheetByName( sheetname );
   var data = sheet.getDataRange().getValues();
-  
+  var formula = sheet.getDataRange().getFormulas();
   var allResults = []
   
   // Sartan: Only send a search if there are more than 1 characters to query.
@@ -278,7 +340,13 @@ function lookup( query )
     // First row is the header, so skip it.
     for ( var i = 1; i < data.length; ++i )
     {
-      var rowResult = checkRow( data[i], query );
+      if ( sheetname == "Games Beaten" ) {
+        var rowResult = checkRow( data[i], formula[i], query );
+      }
+      else if ( sheetname == "Games List") {
+        var rowResult = checkRow_new( data[i], query );
+      }
+      
       if ( rowResult !== undefined )
         allResults.push( rowResult );
     }
@@ -290,15 +358,110 @@ function lookup( query )
 function doGet( e )
 {
   // This test query is used if nothing is passed in "e".
-  var TEST_QUERY = "asfdasfd";
+  var TEST_QUERY = "qbert";
+  // invite or game
+  //var TEST_MODE = 'translate';
+  var TEST_MODE = 'game';
   
-  var query = null;
-  if ( e !== undefined )
-    query = e.parameter.game;
-  else
-    query = TEST_QUERY;
+  var result = "n/a";
   
-  var result = formatLookupResults( lookup( query ), query );
+  // Query must be present to run commands
+  if ( e !== undefined ) {
+    Logger.log( "Full query: " + e.queryString );
+
+    result = "Invalid action";
+    
+    if ( e.parameter.action !== undefined )
+    {
+      if ( e.parameter.action === "game" ) {
+        var queryPrefix = 'action=game&query=';
+        
+        // Sanity check:
+        if ( e.queryString.indexOf( queryPrefix ) === 0 )
+        {
+          // NOTE: This is a hack. Everything after "query=" is considered
+          // part of the game query. It's needed because of nightbot's limitations.
+          var query = e.queryString.replace( queryPrefix, '' );
+          query = decodeURI(query);
+          // if lookup(query) is empty here, check the other sheet if a game is still waiting to be patched
+          
+          result = formatLookupResults( lookup( query, "Games Beaten" ), query );
+        }
+        else
+        {
+          result = "Sanity check failed. Hell has frozen over.";
+        }
+      }
+      else if ( e.parameter.action === "invite" ) {
+        var username = e.parameter.username;
+        var oauth = e.parameter.oauth;
+        result = sendInvite( username, oauth );
+      }
+      else if ( e.parameter.action === "translate" ) {
+        var text = e.parameter.text;
+        var from = e.parameter.from;
+        var to = e.parameter.to;
+        result = gtranslate( text, from, to );
+      }
+    }
+  }
+  // Sartan: Test Mode
+  else {
+    if ( TEST_MODE == 'game' ) {
+      query = TEST_QUERY;
+      result = formatLookupResults( lookup( query, "Games Beaten" ), query );
+    }
+    else if ( TEST_MODE == 'invite') {
+      result = sendInvite( 'bot_sartan', 'invalid_oauth' )
+    }
+    else if ( TEST_MODE == 'translate') {
+      result = gtranslate( 'one two three', "en", "pt" )
+    }
+  }
+  
   Logger.log( "Lookup results: " + result );
   return ContentService.createTextOutput( result );
 }
+
+
+function sendInvite(username, oauth) {
+
+   var payload =
+   {
+     "irc_channel" : inviteRoom,
+     "username" : username
+   };
+
+   var options =
+   {
+     "oauth_token" : oauth,
+     "method" : "post",
+     "payload" : payload,
+     // We want the HTTP code if the request fails.
+     "muteHttpExceptions" : true
+   };
+
+   var response = UrlFetchApp.fetch("https://chatdepot.twitch.tv/room_memberships?oauth_token=" + oauth, options);
+   var err = JSON.parse(response)
+   Logger.log(response)
+   Logger.log(err)
+   
+   var code = response.getResponseCode()
+   if (code == 401) {
+     return "Authorization failure to Twitch Chat Depot, Check script and nightbot oauth: Notify SartanDragonbane - " + err.message
+   }
+   else if ( code == 200 ) {
+     return "Welcome to " + inviteRoomName + " " + username + ", Please refresh Twitch Chat to see the new group above the chat window."                      
+   }
+  else {
+    return "Invite failed. Contact SartanDragonBane or fo__ if this is in error. HTTP Response code: " + code + " Message: " + err.message + " Error: " + err.errors
+  }
+}
+
+// Language codes available here: https://cloud.google.com/translate/v2/using_rest#language-params
+function gtranslate(text, from, to) {
+   
+  return from + ">" + to + ": " + LanguageApp.translate( text, from, to );
+  
+}
+
