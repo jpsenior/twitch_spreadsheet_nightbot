@@ -37,6 +37,12 @@ THE SOFTWARE.
    
 */
 
+// Change log:
+// 2015-11-27 fo: Changed the formatting in formatNewResults() a little bit
+// 2016-02-22 sartan: column header fixes
+// 2016-03-16 sartan: better code: dynamically find column headers.lets TMR change wahtever he wants.
+// 2016-06-24 sartan: Add wiki search feature using google custom search API
+
 
 // TODO:
 // - Minimum query length
@@ -49,19 +55,19 @@ THE SOFTWARE.
 //   to the script. E.g. if query is "battletoads & foobar" nightbot does query: blah?game=battletoads&foobar
 //   A proper fix would be to get nightbot to escape the parameter, but if that's not possible,
 //   e.queryString could be used to figure out the full query.
-
+//   Total game timer
 
 
 
 var ss = SpreadsheetApp.openByUrl(
-  'https://docs.google.com/spreadsheets/d/sheet url here/edit#gid=0'
+  'https://docs.google.com/spreadsheets/d/1KDNGI76HoMNyYLL6RqWu4PqUbw-lI920tf7QTclnLLE/edit#gid=0'
 );
 
-var twitchIcon = 'Kappa'
+var twitchIcon = 'tmrMames'
 
 var inviteRoomName = "Spoilers chat"
 
-var inviteRoom = "_group_Chat_Room"
+var inviteRoom = "_fyaaa_1402351320590"
 
 // Do not edit anything below this line for end user stuff. //
 
@@ -163,15 +169,28 @@ function formatResultShort( result )
   return indexString + result.game;
 }
 
-function checkRow( row, formula, query )
+
+// Sartan: Get the column index # for the first row, eg 'Game Name' -> '1'
+function getColumnNumber(row, name) {
+  row = row[0]
+  for ( var i = 0; i < row.length; ++i) 
+  {
+    if ( name == row[i] ) {
+      return parseInt(i);
+    }
+  }
+}
+
+
+function checkRow( row, formula, query, first )
 {
-  var rowIndex      = row[0],
-      rowGame       = row[1],
-      rowChosenBy   = row[2],
-      rowDateBeaten = row[8],
-      rowTime       = row[9],
-      rowRating     = row[5],
-      rowVideo      = formula[14];
+  var rowIndex      = row[getColumnNumber(first, '#')];
+  var rowGame       = row[getColumnNumber(first, 'Game')];
+  var rowChosenBy   = row[getColumnNumber(first, 'Chosen By')];
+  var rowDateBeaten = row[getColumnNumber(first, 'Date Beaten')];
+  var rowTime       = row[getColumnNumber(first, 'Time')];
+  var rowRating     = row[getColumnNumber(first, 'TMR Rating')];
+  var rowVideo      = formula[getColumnNumber(first, 'Video Link')];
   
   function makeResult( exact )
   {
@@ -225,13 +244,13 @@ function checkRow( row, formula, query )
   return;
 }
 
-function checkRow_new( row, query )
+function checkRow_new( row, query, first )
 {
-  var rowIndex      = row[0],
-      rowGame       = row[1],
-      rowBeaten     = row[3],
-      rowGenre      = row[4]; 
-  var queryClean = clean( query );
+  var rowIndex      = row[getColumnNumber(first, '#')];
+  var rowGame       = row[getColumnNumber(first, 'Licensed NES Games')];
+  var rowBeaten     = row[getColumnNumber(first, 'Date Beaten')];
+  var rowGenre      = row[getColumnNumber(first, 'Genre')];
+  var queryClean    = clean( query );
   if ( clean( rowGame ).indexOf( queryClean ) >= 0)
   {
     return {
@@ -252,7 +271,7 @@ function formatNewResults(results)
  for (var i = 0; i < results.length; ++i)
  {
    var result = results[i];
-   newResults.push( result.game + ":" + result.genre + " " );
+   newResults.push( result.game + " (" + result.genre + ")" );
  }
   return newResults
    
@@ -268,7 +287,7 @@ function formatLookupResults( results, query )
     formatted = formatNewResults(newresults)
     Logger.log(formatted + formatted.length)
     if (formatted.length != 0) {
-      return twitchIcon + ' ' + query + ' was not beaten, but can be picked!! ' + formatted;
+      return twitchIcon + ' ' + formatted + ' was not beaten yet, but can be picked!! ';
     }
   }
   if (results.length === 0 ) {
@@ -327,12 +346,51 @@ function formatLookupResults( results, query )
   return resultString;
 }
 
+
+// Function that looks up the Genres breakdown
+// based on 'query'
+// if query isn't in the spreadsheet, just return the last 'total' row result.
+
+function genre(query)
+{
+  var sheet = ss.getSheetByName( "Genres Breakdown" );
+  var data = sheet.getDataRange().getValues();
+  var result = '';
+  for ( var i = 1; i < sheet.getLastRow(); i++ )
+  {
+    var types = data[i][0];
+    var total = data[i][1];
+    var beaten = data[i][2];
+    var left = data[i][3];
+    var ratio = data[i][4];
+    var time = data[i][5];
+    var average = data[i][6];
+    var shortesttime = data[i][7];
+    var shortestname = data[i][8];
+    var longesttime = data[i][9];
+    var longestname = data[i][10];
+
+    var test = ratio.valueOf(test);
+    var percent = Math.round(ratio*10000)/100
+
+    if ( clean ( types ) == 'TOTAL') {
+      var totalresult = 'tmrHat has beaten ' + beaten + '/' + total + ' ' + types + ' games - ' + percent + '% of NESMania';
+    }
+    else if ( clean ( types ) == clean (query) ) {
+      return 'tmrHat has beaten ' + beaten + '/' + total + ' ' + types + ' games - ' + percent + '%';
+    }
+  }
+  return totalresult;
+}
+
+
 function lookup( query, sheetname )
 {
   var sheet = ss.getSheetByName( sheetname );
   var data = sheet.getDataRange().getValues();
   var formula = sheet.getDataRange().getFormulas();
-  var allResults = []
+  var allResults = [];
+  var first = sheet.getRange(1,1,1,27).getValues()
   
   // Sartan: Only send a search if there are more than 1 characters to query.
   if ( clean( query ).length >= 1 )
@@ -340,11 +398,12 @@ function lookup( query, sheetname )
     // First row is the header, so skip it.
     for ( var i = 1; i < data.length; ++i )
     {
+
       if ( sheetname == "Games Beaten" ) {
-        var rowResult = checkRow( data[i], formula[i], query );
+        var rowResult = checkRow( data[i], formula[i], query, first );
       }
       else if ( sheetname == "Games List") {
-        var rowResult = checkRow_new( data[i], query );
+        var rowResult = checkRow_new( data[i], query, first );
       }
       
       if ( rowResult !== undefined )
@@ -357,11 +416,12 @@ function lookup( query, sheetname )
 
 function doGet( e )
 {
+  
   // This test query is used if nothing is passed in "e".
-  var TEST_QUERY = "qbert";
+  var TEST_QUERY = "triangles";
   // invite or game
   //var TEST_MODE = 'translate';
-  var TEST_MODE = 'game';
+  var TEST_MODE = 'google';
   
   var result = "n/a";
   
@@ -397,11 +457,25 @@ function doGet( e )
         var oauth = e.parameter.oauth;
         result = sendInvite( username, oauth );
       }
+      else if ( e.parameter.action === "genre" ) {
+        var query = clean( e.parameter.query );
+        result = genre( query );
+      }
       else if ( e.parameter.action === "translate" ) {
         var text = e.parameter.text;
         var from = e.parameter.from;
         var to = e.parameter.to;
         result = gtranslate( text, from, to );
+      }
+      else if ( e.parameter.action === "botfun" ) {
+        var level = e.parameter.level;
+        var query = e.parameter.query;
+        var toolname = e.parameter.toolname;
+        var username = e.parameter.username;
+        result = botfun( toolname, level, query, username );
+      }
+      else if ( e.parameter.action === "wiki" ) {
+       result = wiki_search( e.parameter.query ); 
       }
     }
   }
@@ -412,17 +486,68 @@ function doGet( e )
       result = formatLookupResults( lookup( query, "Games Beaten" ), query );
     }
     else if ( TEST_MODE == 'invite') {
-      result = sendInvite( 'bot_sartan', 'invalid_oauth' )
+      result = sendInvite( 'bot_sartan', 'invalid_oauth' );
     }
     else if ( TEST_MODE == 'translate') {
-      result = gtranslate( 'one two three', "en", "pt" )
+      result = gtranslate( 'one two three', "en", "pt" );
+    }
+    else if ( TEST_MODE == 'genre') {
+      result = genre(TEST_QUERY);
+    }
+    else if ( TEST_MODE == 'botfun') {
+      result = botfun( 'ZombieAward', 'owner', 'sartanbot', 'sartantest' );
+    }
+    else if ( TEST_MODE == 'wiki') {
+      result = wiki_search(TEST_QUERY);
     }
   }
   
-  Logger.log( "Lookup results: " + result );
+  Logger.log( result );
   return ContentService.createTextOutput( result );
 }
 
+
+function botfun( toolname, level, query, username )
+{
+  var sheet = ss.getSheetByName( 'Bot Fun' );
+  var data = sheet.getDataRange().getValues();
+  
+  var first = sheet.getRange(1,1,1,27).getValues()
+  
+  var indexToolName      = getColumnNumber(first, 'Tool Name');
+  var indexDescription   = getColumnNumber(first, 'Description');
+  var indexData          = getColumnNumber(first, 'Data');
+  
+  for ( var i = 1; i < data.length; ++i )
+  {
+    var rowToolName = data[i][indexToolName];
+    var rowDescription = data[i][indexDescription];
+    var rowData = data[i][indexData];
+    
+    //Zombie Awards!
+    if (rowToolName == toolname && toolname == 'ZombieAward') {
+      var winner = rowData;
+      var status = ''
+      if (query) {
+        if (level == 'owner' || level == 'moderator') {
+          Logger.log('Update spreadsheet because we are an owner or moderator');
+          status = username + ' updated the ZombieAward: ';
+          var cell = sheet.getRange(i + 1,indexData + 1)
+          cell.setValue(query)
+          Logger.log('the cell is: ' + cell + ' and ' + cell.getValues())
+          //data[i][indexData].setValue(query);
+          winner = query;
+        // Update spreadsheet with value
+        }
+        else {
+          return 'Sorry, ' + username + ', only mods can give awards. ';
+        }
+      }
+      // Give Award!
+      return status + 'Congrats Sherlock ' + winner + ', you have won the TMRZombie award. Type !tired to get your prize!'
+    }
+  }
+}
 
 function sendInvite(username, oauth) {
 
@@ -464,4 +589,30 @@ function gtranslate(text, from, to) {
   return from + ">" + to + ": " + LanguageApp.translate( text, from, to );
   
 }
+
+function wiki_search(query) {
+  // This is constrained to wikipedia only.
+  // Steps:
+  // 1: Obtain a google API application key
+  // 2: Authorise custom search API on the google applications control panel
+  // 3: Create a custom search schema.
+  GOOGLE_API_KEY = 'XXXX';
+  GOOGLE_CUSTOM_SEARCH = 'XXXXX';
+  
+  response = UrlFetchApp.fetch("https://www.googleapis.com/customsearch/v1?cx=" + GOOGLE_CUSTOM_SEARCH + "&key=" + GOOGLE_API_KEY + "&q=" + query);
+  var code = response.getResponseCode();
+  
+  if (code == 200) {
+    var response = JSON.parse(response);
+    results = response.items[0].snippet;
+    link = response.items[0].link;
+    return "Search results: " + results + " " + link
+  }
+  else {
+    return 'Custom wiki search failed. Contact sartanDragonBane';
+  }
+   
+}
+
+
 
